@@ -29,6 +29,7 @@ print(f"Tayyor! Backend: {ai.backend} | Chunklar: {len(ai.chunks)}")
 class Question(BaseModel):
     savol: str
     direction: str | None = None  # python | html | flutter | sql
+    modul: int | None = None
     top_k: int = 3
 
 
@@ -45,4 +46,4 @@ def health():
 
 @app.post("/ask")
 def ask(q: Question):
-    return ai.ask(q.savol, direction=q.direction, top_k=q.top_k)
+    return ai.ask(q.savol, direction=q.direction, modul=q.modul, top_k=q.top_k)

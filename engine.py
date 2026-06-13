@@ -170,7 +170,7 @@ class SynapseAI:
         q = self.vec.transform([savol])
         return (self.tfidf @ q.T).toarray().ravel()
 
-    def ask(self, savol: str, direction: str | None = None, top_k: int = 3) -> dict:
+    def ask(self, savol: str, direction: str | None = None, modul: int | None = None, top_k: int = 3) -> dict:
         t0 = time.time()
         savol_lower = savol.lower()
 
@@ -207,8 +207,33 @@ class SynapseAI:
                         }
 
         raw_scores = self._scores(savol)
-        scores = raw_scores
 
+        # Agar foydalanuvchi muayyan modulda tursa — javobni FAQAT
+        # shu moduldan qidiramiz. Topilmasa, boshqa modulga
+        # "sirpanib ketmasdan" ochiq tarzda "ma'lumot yo'q" deymiz.
+        if direction and modul is not None:
+            mod_mask = np.array([
+                c["direction"] == direction and c["modul"] == modul
+                for c in self.chunks
+            ])
+            if mod_mask.any():
+                mod_scores = np.where(mod_mask, raw_scores, -1.0)
+                top_idx = np.argsort(-mod_scores)[:top_k]
+                best_score = float(mod_scores[top_idx[0]])
+                ms = round((time.time() - t0) * 1000)
+
+                if best_score < self.min_score:
+                    return {
+                        "javob": "Bu haqida ma'lumot yo'q, uzr. Savolingiz shu "
+                                 "modul mavzusiga tegishli emas ko'rinadi — "
+                                 "iltimos shu modul nazariyasi bo'yicha savol bering.",
+                        "topildi": False, "score": round(best_score, 3),
+                        "ms": ms, "manba": None, "backend": self.backend,
+                    }
+                return self._format_answer(mod_scores, top_idx, best_score, ms)
+
+        # Modul ko'rsatilmagan — yo'nalish bo'yicha qidiramiz
+        scores = raw_scores
         if direction:
             mask = np.array([c["direction"] == direction for c in self.chunks])
             scores = np.where(mask, scores, -1.0)
@@ -217,9 +242,7 @@ class SynapseAI:
         best_score = float(scores[top_idx[0]])
         ms = round((time.time() - t0) * 1000)
 
-        rejected = best_score < self.min_score
-
-        if rejected:
+        if best_score < self.min_score:
             return {
                 "javob": "Bu savolga javob bera olmayman. Men faqat SYNAPSE dasturlash "
                          "darsligi (Python, HTML/Frontend, Flutter, SQL) bo'yicha javob "
@@ -228,6 +251,9 @@ class SynapseAI:
                 "ms": ms, "manba": None, "backend": self.backend,
             }
 
+        return self._format_answer(scores, top_idx, best_score, ms)
+
+    def _format_answer(self, scores, top_idx, best_score, ms):
         best = self.chunks[int(top_idx[0])]
         manbalar = []
         for i in top_idx:
@@ -246,3 +272,4 @@ class SynapseAI:
                       "modul": best["modul"], "mavzu": best["mavzu"]},
             "qoshimcha": manbalar[1:],
         }
+
