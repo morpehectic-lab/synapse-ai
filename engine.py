@@ -207,11 +207,18 @@ class SynapseAI:
                         }
 
         raw_scores = self._scores(savol)
-        scores = raw_scores
+        scores = raw_scores.copy()
+
+        # Nazariya bo'laklari afzal — quiz/topshiriq qisqa Savol-Javob
+        # formatidagi matnlar qisqa savollarga "sun'iy" yaqin chiqadi,
+        # lekin foydalanuvchiga asosiy tushuntirish kerak
+        TYPE_WEIGHT = {"nazariya": 1.0, "pdf": 0.97, "topshiriq": 0.90, "quiz": 0.80}
+        for i, c in enumerate(self.chunks):
+            scores[i] *= TYPE_WEIGHT.get(c.get("type"), 1.0)
 
         if direction:
             mask = np.array([c["direction"] == direction for c in self.chunks])
-            scores = np.where(mask, raw_scores, -1.0)
+            scores = np.where(mask, scores, -1.0)
 
         top_idx = np.argsort(-scores)[:top_k]
         best_score = float(scores[top_idx[0]])
