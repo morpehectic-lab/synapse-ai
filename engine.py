@@ -67,12 +67,22 @@ def make_chunks(data_dir: str):
                 "modul": m["modul"],
                 "mavzu": m["mavzu"],
             }
-            # Nazariya — paragraflar
+            # Nazariya — mazmunli bo'laklarga guruhlab (kichik kod
+            # fragmentlarini tushuntirish matni bilan birga saqlash)
             naz = m.get("nazariya", "")
-            paras = [p.strip() for p in naz.split("\n\n") if len(p.strip()) > 80]
-            if not paras and naz.strip():
-                paras = [naz.strip()]
-            for i, p in enumerate(paras):
+            raw_paras = [p.strip() for p in naz.split("\n\n") if p.strip()]
+            naz_chunks, buf = [], ""
+            MAX_LEN = 600
+            for p in raw_paras:
+                if buf and len(buf) + len(p) + 2 > MAX_LEN:
+                    naz_chunks.append(buf)
+                    buf = p
+                else:
+                    buf = (buf + "\n\n" + p) if buf else p
+            if buf:
+                naz_chunks.append(buf)
+            naz_chunks = [c for c in naz_chunks if len(c) > 40]
+            for i, p in enumerate(naz_chunks):
                 # Mavzuni matnga qo'shamiz — qidiruv aniqroq bo'ladi
                 chunks.append({**base, "type": "nazariya", "part": i,
                                "text": f"{m['mavzu']}. {p}"})
@@ -110,8 +120,14 @@ class SynapseAI:
             self.model = SentenceTransformer(MODEL_NAME)
             texts = [c["text"] for c in self.chunks]
             emb_path = os.path.join(index_dir, "embeddings.npy") if index_dir else None
+            cached = None
             if emb_path and os.path.exists(emb_path):
-                self.emb = np.load(emb_path)
+                cached = np.load(emb_path)
+                if cached.shape[0] != len(self.chunks):
+                    # Eski keshl (chunklash o'zgargan) — qayta hisoblaymiz
+                    cached = None
+            if cached is not None:
+                self.emb = cached
             else:
                 self.emb = self.model.encode(
                     texts, batch_size=64, normalize_embeddings=True
