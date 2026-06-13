@@ -33,6 +33,15 @@ PROGRAMMING_HINTS = [
     "selector", "tag", "loop", "sikl", "massiv", "array", "list", "map",
 ]
 
+# Har bir yo'nalishga xos atamalar — boshqa yo'nalish atamasi
+# ishlatilsa va joriy yo'nalish atamasi bo'lmasa, mavzu chetga chiqgan
+DIRECTION_KEYWORDS = {
+    "python": ["python", "django", "flask", "pandas", "decorator", "pip", ".py"],
+    "html": ["html", "css", "javascript", "dom", " tag", "selector", "flexbox"],
+    "flutter": ["flutter", "dart", "widget", "statelesswidget", "statefulwidget", "pubspec"],
+    "sql": ["sql", "select ", "join", "database", "ma'lumotlar bazasi", "jadval"],
+}
+
 DIRECTIONS = {
     "python":  ("python_65.json",  "Python Backend"),
     "html":    ("html_60.json",    "HTML/Frontend"),
@@ -149,7 +158,7 @@ class SynapseAI:
         t0 = time.time()
         savol_lower = savol.lower()
 
-        # Tezkor heuristika: ma'lum-mavzudan-tashqari so'zlar bor,
+        # Tezkor heuristika 1: ma'lum-mavzudan-tashqari so'zlar bor,
         # dasturlash atamasi yo'q — darhol rad etamiz
         has_off_topic = any(p in savol_lower for p in OFF_TOPIC_PATTERNS)
         has_prog_hint = any(p in savol_lower for p in PROGRAMMING_HINTS)
@@ -163,6 +172,24 @@ class SynapseAI:
                 "ms": ms, "manba": None, "backend": self.backend,
             }
 
+        # Tezkor heuristika 2: savol boshqa yo'nalishni aniq tilga oladi
+        # (masalan Flutter modulida "Python da..." deb so'ralsa)
+        if direction:
+            for dir_key, dir_keywords in DIRECTION_KEYWORDS.items():
+                if dir_key == direction:
+                    continue
+                if any(kw in savol_lower for kw in dir_keywords):
+                    own_keywords = DIRECTION_KEYWORDS.get(direction, [])
+                    if not any(kw in savol_lower for kw in own_keywords):
+                        ms = round((time.time() - t0) * 1000)
+                        return {
+                            "javob": "Bu savol joriy modul mavzusiga tegishli emas "
+                                     "ko'rinadi. Iltimos shu modul mavzusi bo'yicha "
+                                     "savol bering, yoki tegishli yo'nalishga o'ting.",
+                            "topildi": False, "score": 0.0,
+                            "ms": ms, "manba": None, "backend": self.backend,
+                        }
+
         raw_scores = self._scores(savol)
         scores = raw_scores
 
@@ -172,16 +199,9 @@ class SynapseAI:
 
         top_idx = np.argsort(-scores)[:top_k]
         best_score = float(scores[top_idx[0]])
-        global_best = float(raw_scores.max())
         ms = round((time.time() - t0) * 1000)
 
-        # Savol shu yo'nalishga tegishli emasligini aniqlash:
-        # 1) Umuman past skor (hech qayerda mos kelmaydi)
-        # 2) Yoki global eng yaxshi moslik boshqa yo'nalishda ancha yuqori
-        #    (savol mavzu doirasidan tashqarida)
         rejected = best_score < self.min_score
-        if direction and not rejected and (global_best - best_score) > 0.08:
-            rejected = True
 
         if rejected:
             return {
