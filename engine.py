@@ -14,8 +14,24 @@ import time
 import numpy as np
 
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-MIN_SCORE_ST = 0.45    # sentence-transformers uchun
-MIN_SCORE_TFIDF = 0.22 # TF-IDF uchun (boshqa shkala)
+MIN_SCORE_ST = 0.35    # sentence-transformers uchun
+MIN_SCORE_TFIDF = 0.12 # TF-IDF uchun (boshqa shkala)
+
+# Dasturlash bilan aloqasi bo'lmagan, tez-tez so'raladigan mavzular —
+# bu so'zlar topilsa va dasturlash atamasi bo'lmasa, javob berilmaydi
+OFF_TOPIC_PATTERNS = [
+    "ob-havo", "ob havo", "harorat bugun", "yomg'ir", "havo qanday",
+    "restoran", "ovqat", "taom tayyorla", "retsept",
+    "poytaxt", "futbol", "match natija", "kino", "film",
+    "musiqa", "qo'shiq", "yangiliklar", "siyosat",
+    "valyuta kursi", "dollar kursi", "soat necha", "bugun necha",
+]
+PROGRAMMING_HINTS = [
+    "kod", "dastur", "funksiya", "function", "class", "metod", "method",
+    "python", "html", "flutter", "sql", "dart", "widget", "css", "javascript",
+    "o'zgaruvchi", "ozgaruvchi", "variable", "ma'lumot", "database", "query",
+    "selector", "tag", "loop", "sikl", "massiv", "array", "list", "map",
+]
 
 DIRECTIONS = {
     "python":  ("python_65.json",  "Python Backend"),
@@ -131,17 +147,43 @@ class SynapseAI:
 
     def ask(self, savol: str, direction: str | None = None, top_k: int = 3) -> dict:
         t0 = time.time()
-        scores = self._scores(savol)
+        savol_lower = savol.lower()
+
+        # Tezkor heuristika: ma'lum-mavzudan-tashqari so'zlar bor,
+        # dasturlash atamasi yo'q — darhol rad etamiz
+        has_off_topic = any(p in savol_lower for p in OFF_TOPIC_PATTERNS)
+        has_prog_hint = any(p in savol_lower for p in PROGRAMMING_HINTS)
+        if has_off_topic and not has_prog_hint:
+            ms = round((time.time() - t0) * 1000)
+            return {
+                "javob": "Bu savolga javob bera olmayman. Men faqat SYNAPSE dasturlash "
+                         "darsligi (Python, HTML/Frontend, Flutter, SQL) bo'yicha javob "
+                         "beraman. Dasturlash bo'yicha savol bering!",
+                "topildi": False, "score": 0.0,
+                "ms": ms, "manba": None, "backend": self.backend,
+            }
+
+        raw_scores = self._scores(savol)
+        scores = raw_scores
 
         if direction:
             mask = np.array([c["direction"] == direction for c in self.chunks])
-            scores = np.where(mask, scores, -1.0)
+            scores = np.where(mask, raw_scores, -1.0)
 
         top_idx = np.argsort(-scores)[:top_k]
         best_score = float(scores[top_idx[0]])
+        global_best = float(raw_scores.max())
         ms = round((time.time() - t0) * 1000)
 
-        if best_score < self.min_score:
+        # Savol shu yo'nalishga tegishli emasligini aniqlash:
+        # 1) Umuman past skor (hech qayerda mos kelmaydi)
+        # 2) Yoki global eng yaxshi moslik boshqa yo'nalishda ancha yuqori
+        #    (savol mavzu doirasidan tashqarida)
+        rejected = best_score < self.min_score
+        if direction and not rejected and (global_best - best_score) > 0.08:
+            rejected = True
+
+        if rejected:
             return {
                 "javob": "Bu savolga javob bera olmayman. Men faqat SYNAPSE dasturlash "
                          "darsligi (Python, HTML/Frontend, Flutter, SQL) bo'yicha javob "
